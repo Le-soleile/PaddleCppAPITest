@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.18)
-set(PROJECT_NAME_STR google-test-examples)
-project(${PROJECT_NAME_STR} C CXX)
+set(PROJECT_NAME)
+project(${PROJECT_NAME} C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -101,7 +101,9 @@ create_paddle_tests(
 # ---------------------------------------------------------------------------
 # Build Torch test case
 # ---------------------------------------------------------------------------
-set(TORCH_DIR "/usr/lib/libtorch/" CACHE PATH "Path to libtorch installation")
+set(TORCH_DIR
+    "/usr/lib/libtorch/"
+    CACHE PATH "Path to libtorch installation")
 
 set(TORCH_LIBRARIES "")
 file(GLOB_RECURSE TORCH_LIBRARIES "${TORCH_DIR}/lib/*.so"
