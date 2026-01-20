@@ -2,9 +2,22 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/ops/ones.h>
 #include <gtest/gtest.h>
+#if !USE_PADDLE_API
 #include <torch/all.h>
+#endif
 
 #include <vector>
+#if USE_PADDLE_API
+#include "paddle/phi/api/include/tensor.h"
+#include "paddle/phi/common/place.h"
+#include "paddle/phi/core/dense_tensor.h"
+#include "paddle/phi/core/memory/malloc.h"
+namespace phi {
+inline std::ostream& operator<<(std::ostream& os, AllocationType type) {
+  return os << static_cast<int>(type);
+}
+}  // namespace phi
+#endif
 
 namespace at {
 namespace test {
@@ -168,6 +181,73 @@ TEST_F(TensorTest, Transpose) {
   at::Tensor transposed = tensor.transpose(0, 2);
   EXPECT_EQ(transposed.sizes()[0], 4);
   EXPECT_EQ(transposed.sizes()[2], 2);
+}
+
+// 测试 var(bool unbiased)
+TEST_F(TensorTest, VarUnbiased) {
+  std::vector<int64_t> shape = {2, 3};
+  at::Tensor test_tensor = at::ones(shape, at::kFloat);
+  // 设置一些不同的值以便计算方差
+  test_tensor.data_ptr<float>()[0] = 1.0f;
+  test_tensor.data_ptr<float>()[1] = 2.0f;
+  test_tensor.data_ptr<float>()[2] = 3.0f;
+  test_tensor.data_ptr<float>()[3] = 4.0f;
+  test_tensor.data_ptr<float>()[4] = 5.0f;
+  test_tensor.data_ptr<float>()[5] = 6.0f;
+
+  // 测试 unbiased=True (默认)
+  at::Tensor var_result = test_tensor.var(true);
+  EXPECT_TRUE(var_result.defined());
+  EXPECT_EQ(var_result.dim(), 0);  // 标量结果
+
+  // 测试 unbiased=False
+  at::Tensor var_result_biased = test_tensor.var(false);
+  EXPECT_TRUE(var_result_biased.defined());
+  EXPECT_EQ(var_result_biased.dim(), 0);
+}
+
+// 测试 var(OptionalIntArrayRef dim, bool unbiased, bool keepdim)
+TEST_F(TensorTest, VarDim) {
+  std::vector<int64_t> shape = {2, 3};
+  at::Tensor test_tensor = at::ones(shape, at::kFloat);
+
+  for (int i = 0; i < 6; ++i) {
+    test_tensor.data_ptr<float>()[i] = static_cast<float>(i + 1);
+  }
+
+  // 测试在维度 0 上计算方差
+  at::Tensor var_result = test_tensor.var({0}, true, false);
+  EXPECT_TRUE(var_result.defined());
+  EXPECT_EQ(var_result.dim(), 1);
+  EXPECT_EQ(var_result.size(0), 3);
+
+  // 测试在维度 1 上计算方差，keepdim=true
+  at::Tensor var_result_keepdim = test_tensor.var({1}, true, true);
+  EXPECT_TRUE(var_result_keepdim.defined());
+  EXPECT_EQ(var_result_keepdim.dim(), 2);
+  EXPECT_EQ(var_result_keepdim.size(0), 2);
+  EXPECT_EQ(var_result_keepdim.size(1), 1);
+}
+
+// 测试 var(OptionalIntArrayRef dim, optional<Scalar> correction, bool keepdim)
+TEST_F(TensorTest, VarCorrection) {
+  std::vector<int64_t> shape = {2, 3};
+  at::Tensor test_tensor = at::ones(shape, at::kFloat);
+  for (int i = 0; i < 6; ++i) {
+    test_tensor.data_ptr<float>()[i] = static_cast<float>(i + 1);
+  }
+
+  // 测试使用 correction=1.0 (Bessel's correction)
+  at::Tensor var_result = test_tensor.var({0}, at::Scalar(1.0), false);
+  EXPECT_TRUE(var_result.defined());
+  EXPECT_EQ(var_result.dim(), 1);
+  EXPECT_EQ(var_result.size(0), 3);
+
+  // 测试使用 correction=0.0 (population variance)
+  at::Tensor var_result_pop = test_tensor.var({0}, at::Scalar(0.0), false);
+  EXPECT_TRUE(var_result_pop.defined());
+  EXPECT_EQ(var_result_pop.dim(), 1);
+  EXPECT_EQ(var_result_pop.size(0), 3);
 }
 
 }  // namespace test
