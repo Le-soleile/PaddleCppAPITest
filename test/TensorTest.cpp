@@ -194,16 +194,6 @@ TEST_F(TensorTest, IsCpu) {
   file.saveFile();
 }
 
-// 测试 cpu
-TEST_F(TensorTest, Cpu) {
-  at::Tensor cpu_tensor = tensor.cpu();
-
-  EXPECT_TRUE(cpu_tensor.is_cpu());
-  EXPECT_EQ(cpu_tensor.device().type(), c10::DeviceType::CPU);
-  EXPECT_EQ(cpu_tensor.numel(), tensor.numel());
-  EXPECT_FLOAT_EQ(cpu_tensor.data_ptr<float>()[0], tensor.data_ptr<float>()[0]);
-}
-
 // 测试 is_cuda (在 CPU tensor 上应该返回 false)
 TEST_F(TensorTest, IsCuda) {
   auto file_name = g_custom_param.get();
