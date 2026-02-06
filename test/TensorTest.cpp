@@ -1,8 +1,6 @@
 #include <ATen/ATen.h>
 #include <gtest/gtest.h>
-#if !USE_PADDLE_API
 #include <torch/all.h>
-#endif
 
 #include <string>
 #include <vector>
