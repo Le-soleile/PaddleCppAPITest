@@ -134,97 +134,6 @@ static void write_abs_result_to_file(FileManerger* file, const at::Tensor& resul
 
 > Paddle 兼容层的 dtype 映射与 PyTorch 存在细微差异（例如默认 dtype 可能不同），输出对比时需关注此类隐式转换。
 
-## 按算子类别的测试设计
-
-下面按六大类说明每类接口的测试重点和必要覆盖项。
-
-### 1. Creation Ops — `zeros`, `ones`, `empty`, `full`, `arange`, `linspace`, `from_blob` …
-
-覆盖项：
-- 默认 dtype vs 显式指定 dtype
-- 各 shape 区间（标量 / 小 / 大 / 边界）
-- `from_blob` 的外部内存生命周期（避免 dangling pointer）
-- `empty` 不检查数据值，只验证 shape 和 dtype 一致
-
-```cpp
-TEST_F(CreationOpsTest, ZerosMultiShape) {
-  at::Tensor scalar = at::zeros({}, at::kFloat);          // 0-d
-  at::Tensor vec    = at::zeros({2, 3}, at::kFloat);      // small
-  at::Tensor large  = at::zeros({1000, 1000}, at::kFloat);// large
-  at::Tensor dbl    = at::zeros({3, 4}, at::kDouble);     // dtype
-  at::Tensor itn    = at::zeros({2, 2}, at::kInt);        // int dtype
-}
-```
-
-### 2. Math Ops — `abs`, `add`, `sub`, `mul`, `div`, `neg`, `pow`, `exp`, `log`, `sqrt` …
-
-覆盖项：
-- 值域分区：全正、全负、混合正负零、极大值 (`1e10`)、极小值 (`1e-10`)
-- 特殊浮点值：`NaN`、`+Inf`、`-Inf`、`-0.0` 与 `+0.0` 的区分
-- 原地变体：`at::abs_(t)` vs `at::abs(t)` — 原地操作的返回值是否为同一 storage
-- `out=` 重载：`at::abs_out(output, input)` — 验证输出 tensor 被正确写入且 shape/dtype 匹配
-
-```cpp
-TEST_F(AbsTest, EdgeValues) {
-  at::Tensor t = at::zeros({6}, at::kFloat);
-  float* d = t.data_ptr<float>();
-  d[0] = 1e10f;   d[1] = -1e10f;  // 极值
-  d[2] = 1e-10f;  d[3] = -1e-10f; // 亚正常域附近
-  d[4] = 0.0f;    d[5] = -0.0f;   // 正负零
-
-  at::Tensor result = at::abs(t);
-  // 写入文件 ...
-}
-```
-
-### 3. Shape Ops — `reshape`, `view`, `flatten`, `transpose`, `squeeze`, `unsqueeze`, `narrow`, `expand` …
-
-覆盖项：
-- `view` 与 `reshape`：连续 tensor 上两者等价，非连续 tensor 上 `view` 抛异常而 `reshape` 不会 — 需验证此差异
-- 负索引：`squeeze(-1)`、`narrow(0, -N, len)` 等
-- `transpose` 后 tensor 的 `is_contiguous()` 返回 `false`，后续算子的行为可能变化
-- `expand` 不分配新内存（stride 为 0），验证数据共享语义
-
-### 4. Indexing Ops — `index`, `index_select`, `select`, `take`, `masked_select`, `gather`, `scatter` …
-
-覆盖项：
-- 整数索引、切片索引、布尔掩码索引三种路径
-- 负索引：`select(0, -1)` 等价于最后一个元素
-- 空索引（`masked_select` 所有元素不满足条件）→ 返回 0 元素 tensor
-- 多维索引场景下 broadcast 规则的一致性
-
-### 5. Comparison Ops — `eq`, `ne`, `gt`, `lt`, `ge`, `le`, `isfinite`, `isinf`, `isnan` …
-
-覆盖项：
-- 返回 dtype 固定为 `kBool`，无论输入 dtype
-- `NaN` 的不等性：`NaN != NaN` 应为 `true`，`NaN == NaN` 应为 `false`
-- `Inf` 与有限大数的比较
-- 混合 dtype 输入（如 float vs double）时的隐式提升规则
-
-### 6. Reduction Ops — `sum`, `mean`, `var`, `std`, `min`, `max`, `argmin`, `argmax`, `any`, `all` …
-
-覆盖项：
-- 全局归约（不指定 dim）vs 指定 dim 归约
-- `keepdim=true/false` 对输出 shape 的影响
-- `dtype` 参数：`at::sum(input, at::kDouble)` — 累加精度提升
-- `out=` 重载：输出 tensor 预分配时的 shape 匹配要求
-- 空 tensor 归约行为：`at::sum(at::zeros({0}, at::kFloat))` 应返回 `0`
-
-```cpp
-TEST_F(SumTest, DimVariants) {
-  at::Tensor input = at::ones({3, 4, 5}, at::kFloat);
-
-  at::Tensor all      = at::sum(input);                    // 标量 60.0
-  at::Tensor dim0     = at::sum(input, {0}, false);        // shape {4, 5}
-  at::Tensor dim01    = at::sum(input, {0, 1}, false);     // shape {5}
-  at::Tensor keep     = at::sum(input, {0}, true);         // shape {1, 4, 5}
-  at::Tensor as_dbl   = at::sum(input, at::kDouble);       // dtype 提升
-
-  at::Tensor out = at::zeros({4, 5}, at::kFloat);
-  at::sum_out(out, input, {0}, false);                     // out= 重载
-}
-```
-
 ## 异常行为测试
 
 部分算子在非法输入下的异常行为可能在两个框架间存在差异（一个抛异常、另一个返回 NaN 或空 tensor）。此类差异需显式捕获并记录：
@@ -307,20 +216,6 @@ EXPECT_TRUE(result.is_contiguous()) << "Non-contiguous result from reshape";
 ```bash
 ./torch/torch_AbsTest --gtest_filter="AbsTest.EdgeValues"
 ```
-
-## 已知跨框架差异点
-
-以下是实践中高频出现的 Paddle 与 PyTorch 行为差异，编写测试时需针对性设计用例：
-
-| 差异点 | 表现 | 测试建议 |
-|--------|------|---------|
-| **默认 dtype** | PyTorch 默认 `kFloat`，Paddle 在某些路径下可能为 `kFloat64` | 所有 creation op 显式指定 dtype |
-| **broadcast 语义** | 两框架均遵循 NumPy 风格 broadcast，但边界情况（如 `{0}` 参与 broadcast）行为可能不同 | 补充含零维度的 broadcast 用例 |
-| **浮点精度** | 底层 BLAS/cuBLAS 实现差异导致 `sum` 等归约操作在大 shape 上存在 ULP 级别偏差 | 大 shape 归约测试可选容差对比 |
-| **contiguous 约定** | `transpose` 后 tensor 的 stride 布局一致，但部分算子对非连续输入的 fast path 不同 | 全部算子补充非连续输入用例 |
-| **异常语义** | 同一非法输入可能一侧抛 `c10::Error` 而另一侧返回空 tensor 或 NaN | 参照"异常行为测试"章节处理 |
-| **原地操作返回值** | `abs_()` 是否返回当前 tensor 的引用 vs 新 tensor — 语义一致但指针可能不同 | 对比 `data_ptr` 是否相同 |
-| **内存布局** | `as_strided` 系列 API 的 storage offset 计算差异 | 配合 `storage_offset()` 验证 |
 
 ## 新算子测试检查清单
 
