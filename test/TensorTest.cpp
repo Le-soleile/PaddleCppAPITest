@@ -733,7 +733,8 @@ TEST_F(TensorTest, FloorDivide) {
   FileManerger file(GetTestCaseResultFileName());
   file.createFile();
   at::Tensor input = at::ones({2, 3}, at::kFloat).fill_(7.0f);
-  input.floor_divide_(3.0);
+  at::Scalar divisor = 3.0f;
+  input.floor_divide_(divisor);
   float* data = input.data_ptr<float>();
   file << std::to_string(static_cast<int>(data[0])) << " ";
   file.saveFile();
