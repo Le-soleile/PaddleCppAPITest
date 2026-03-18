@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <optional>
+#include <utility>
 #include <vector>
 
 #include "../src/file_manager.h"
@@ -84,6 +85,9 @@ TEST_F(OptionalArrayRefTest, FromInitializerList) {
 }
 
 // 从 std::optional<ArrayRef> 构造
+// DIFF: 直接使用 std::optional<c10::ArrayRef<int64_t>>(std::vector{...})
+// 会让 ArrayRef 持有临时 vector 的悬空地址，front() 输出为随机值，
+// 导致 Paddle/Torch 结果不一致。按规范仅保留稳定字段（has_value/size）。
 TEST_F(OptionalArrayRefTest, FromOptionalArrayRef) {
   std::optional<c10::ArrayRef<int64_t>> opt_arr(std::vector<int64_t>{5, 6, 7});
   c10::OptionalArrayRef<int64_t> arr(opt_arr);
@@ -144,6 +148,45 @@ TEST_F(OptionalArrayRefTest, ValueMethod) {
   FileManerger file(file_name);
   file.openAppend();
   auto& ref = arr.value();
+  file << std::to_string(ref.size()) << " ";
+  file << std::to_string(ref.front()) << " ";
+  file << std::to_string(ref.back()) << " ";
+  file.saveFile();
+}
+
+// value() const& 重载
+TEST_F(OptionalArrayRefTest, ValueMethodConstLValue) {
+  const c10::OptionalArrayRef<int64_t> arr({11, 12, 13});
+  auto file_name = g_custom_param.get();
+  FileManerger file(file_name);
+  file.openAppend();
+  const auto& ref = arr.value();
+  file << std::to_string(ref.size()) << " ";
+  file << std::to_string(ref.front()) << " ";
+  file << std::to_string(ref.back()) << " ";
+  file.saveFile();
+}
+
+// value() && 重载
+TEST_F(OptionalArrayRefTest, ValueMethodRValue) {
+  c10::OptionalArrayRef<int64_t> arr({21, 22, 23});
+  auto file_name = g_custom_param.get();
+  FileManerger file(file_name);
+  file.openAppend();
+  auto&& ref = std::move(arr).value();
+  file << std::to_string(ref.size()) << " ";
+  file << std::to_string(ref.front()) << " ";
+  file << std::to_string(ref.back()) << " ";
+  file.saveFile();
+}
+
+// value() const&& 重载
+TEST_F(OptionalArrayRefTest, ValueMethodConstRValue) {
+  const c10::OptionalArrayRef<int64_t> arr({31, 32, 33});
+  auto file_name = g_custom_param.get();
+  FileManerger file(file_name);
+  file.openAppend();
+  auto&& ref = std::move(arr).value();
   file << std::to_string(ref.size()) << " ";
   file << std::to_string(ref.front()) << " ";
   file << std::to_string(ref.back()) << " ";
@@ -215,11 +258,21 @@ TEST_F(OptionalArrayRefTest, EmplaceMethod) {
   arr.emplace(std::initializer_list<int64_t>{1, 2, 3, 4});
   file << std::to_string(arr.has_value() ? 1 : 0) << " ";
   file << std::to_string(arr->size()) << " ";
-  // DIFF: 以下元素遍历输出悬空引用（initializer_list 临时对象已销毁），
-  // 结果为随机内存值，Paddle 与 Torch 间不可复现，故注释掉。
-  // for (const auto& v : *arr) {
-  //   file << std::to_string(v) << " ";
-  // }
+  for (const auto& v : *arr) {
+    file << std::to_string(v) << " ";
+  }
+  file.saveFile();
+}
+
+// emplace() 无参重载
+TEST_F(OptionalArrayRefTest, EmplaceMethodNoArgs) {
+  c10::OptionalArrayRef<int64_t> arr;
+  auto file_name = g_custom_param.get();
+  FileManerger file(file_name);
+  file.openAppend();
+  auto& ref = arr.emplace();
+  file << std::to_string(arr.has_value() ? 1 : 0) << " ";
+  file << std::to_string(ref.size()) << " ";
   file.saveFile();
 }
 
@@ -303,8 +356,7 @@ TEST_F(OptionalArrayRefTest, CopyConstruction) {
   file.openAppend();
   file << std::to_string(arr2.has_value() ? 1 : 0) << " ";
   file << std::to_string(arr2->size()) << " ";
-  // 注释掉以下行：arr2->front() 返回的内部对象指针/标识符在两个框架间存在差异
-  // file << std::to_string(arr2->front()) << " ";
+  file << std::to_string(arr2->front()) << " ";
   file.saveFile();
 }
 
@@ -319,8 +371,7 @@ TEST_F(OptionalArrayRefTest, MoveConstruction) {
   file.openAppend();
   file << std::to_string(arr2.has_value() ? 1 : 0) << " ";
   file << std::to_string(arr2->size()) << " ";
-  // 注释掉以下行：arr2->front() 返回的内部对象指针/标识符在两个框架间存在差异
-  // file << std::to_string(arr2->front()) << " ";
+  file << std::to_string(arr2->front()) << " ";
   file.saveFile();
 }
 
@@ -349,11 +400,9 @@ TEST_F(OptionalArrayRefTest, InPlaceConstruction) {
   file.openAppend();
   file << std::to_string(arr.has_value() ? 1 : 0) << " ";
   file << std::to_string(arr->size()) << " ";
-  // DIFF: 以下元素遍历输出悬空引用（临时 vector 已销毁），
-  // 结果为随机内存值，Paddle 与 Torch 间不可复现，故注释掉。
-  // for (const auto& v : *arr) {
-  //   file << std::to_string(v) << " ";
-  // }
+  for (const auto& v : *arr) {
+    file << std::to_string(v) << " ";
+  }
   file.saveFile();
 }
 
